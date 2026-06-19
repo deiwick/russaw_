@@ -1,0 +1,246 @@
+/* ==========================================
+   RUSSAW: THE TACTICAL COLLECTIVE
+   Core CSS Design System / globals.css
+   ========================================== */
+
+/* 1. Design Tokens */
+:root {
+  --bg-pitch: #000000;
+  --bg-deep: #050505;
+  --bg-elevated: #0e0e0e;
+  --bg-terminal: #121212;
+  
+  --fg-primary: #f0f0f0;
+  --fg-secondary: #888888;
+  --fg-dark: #444444;
+  
+  --neon-green: #00ff66;
+  --neon-green-glow: rgba(0, 255, 102, 0.15);
+  --neon-red: #ff3333;
+  --neon-red-glow: rgba(255, 51, 51, 0.2);
+  --neon-cyan: #00e5ff;
+  --neon-orange: #ff9900;
+  
+  --border-dim: #1d1d1d;
+  --border-bright: #333333;
+  
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Fira Code", monospace;
+  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-smooth: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 2. Base Resets */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  background-color: var(--bg-pitch);
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.6;
+  letter-spacing: -0.02em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* Scrollbar customization */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-pitch);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-bright);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--neon-green);
+}
+
+/* 3. Utility Styles */
+.glow-text-green {
+  text-shadow: 0 0 10px var(--neon-green-glow), 0 0 20px rgba(0,255,102,0.05);
+}
+
+.terminal-border {
+  border: 1px solid var(--border-dim);
+}
+
+.terminal-border:hover {
+  border-color: var(--neon-green);
+  box-shadow: 0 0 10px var(--neon-green-glow);
+}
+
+/* 4. Layouts & Containers */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 1.5rem;
+  max-width: 640px; /* Mobile-first container */
+  margin: 0 auto;
+}
+
+.terminal-card {
+  background: var(--bg-deep);
+  border: 1px solid var(--border-dim);
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+  position: relative;
+  overflow: hidden;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+/* Scanline Effect overlay for terminal aesthetic */
+.scanlines::after {
+  content: " ";
+  display: block;
+  position: fixed;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+  z-index: 9999;
+  background-size: 100% 3px, 3px 100%;
+  pointer-events: none;
+}
+
+/* CRT Flicker animation */
+@keyframes crt-flicker {
+  0% { opacity: 0.98; }
+  50% { opacity: 1; }
+  100% { opacity: 0.99; }
+}
+
+.crt-effect {
+  animation: crt-flicker 0.15s infinite;
+}
+
+/* 5. Custom UI Components */
+.tactical-btn {
+  background: transparent;
+  color: var(--fg-primary);
+  border: 1px solid var(--fg-primary);
+  font-family: var(--font-mono);
+  padding: 0.75rem 1.5rem;
+  font-weight: bold;
+  text-transform: uppercase;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all var(--transition-fast);
+}
+
+.tactical-btn:hover {
+  background: var(--fg-primary);
+  color: var(--bg-pitch);
+  box-shadow: 0 0 15px rgba(255,255,255,0.2);
+}
+
+.tactical-btn.primary {
+  border-color: var(--neon-green);
+  color: var(--neon-green);
+}
+
+.tactical-btn.primary:hover {
+  background: var(--neon-green);
+  color: var(--bg-pitch);
+  box-shadow: 0 0 15px var(--neon-green-glow);
+}
+
+.tactical-btn.danger {
+  border-color: var(--neon-red);
+  color: var(--neon-red);
+}
+
+.tactical-btn.danger:hover {
+  background: var(--neon-red);
+  color: var(--fg-primary);
+  box-shadow: 0 0 15px var(--neon-red-glow);
+}
+
+/* Forms styling */
+.tactical-input, .tactical-select, .tactical-textarea {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-dim);
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  padding: 0.75rem;
+  margin-top: 0.5rem;
+  margin-bottom: 1rem;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.tactical-input:focus, .tactical-select:focus, .tactical-textarea:focus {
+  border-color: var(--neon-green);
+  box-shadow: 0 0 8px var(--neon-green-glow);
+}
+
+.tactical-label {
+  font-size: 0.85rem;
+  color: var(--fg-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: block;
+}
+
+/* 6. Typography & Indicators */
+.neon-badge {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  font-weight: bold;
+  border-radius: 2px;
+  border: 1px solid;
+}
+
+.neon-badge.green {
+  border-color: var(--neon-green);
+  color: var(--neon-green);
+  background: rgba(0, 255, 102, 0.05);
+}
+
+.neon-badge.red {
+  border-color: var(--neon-red);
+  color: var(--neon-red);
+  background: rgba(255, 51, 51, 0.05);
+}
+
+.neon-badge.cyan {
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+  background: rgba(0, 229, 255, 0.05);
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--neon-green);
+  box-shadow: 0 0 8px var(--neon-green);
+  animation: pulse-animation 2s infinite;
+}
+
+@keyframes pulse-animation {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(0, 255, 102, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgba(0, 255, 102, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(0, 255, 102, 0);
+  }
+}

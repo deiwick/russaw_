@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: russaw-db
+    environment:
+      POSTGRES_DB: russaw
+      POSTGRES_USER: operator
+      POSTGRES_PASSWORD: operator_secure_pass_2026
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db:/docker-entrypoint-initdb.d
+    networks:
+      - russaw-network
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: russaw-api
+    command: npm run dev
+    environment:
+      - NODE_ENV=development
+      - PORT=5000
+      - DATABASE_URL=postgresql://operator:operator_secure_pass_2026@db:5432/russaw
+      - JWT_SECRET=russaw_underground_jwt_secret_key_2026
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./api:/app
+      - /app/node_modules
+    depends_on:
+      - db
+    networks:
+      - russaw-network
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: russaw-web
+    command: npm run dev
+    environment:
+      - PORT=3000
+      - NEXT_PUBLIC_API_URL=http://localhost:5000/api
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./web:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - api
+    networks:
+      - russaw-network
+    restart: unless-stopped
+
+networks:
+  russaw-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
