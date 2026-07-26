@@ -32,13 +32,18 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// Mount Active Channels
+// Mount Active Channels (Resilient to environment variables with or without '/api')
 app.use('/api/reports', reportsRouter);
+app.use('/reports', reportsRouter);
+
 app.use('/api/missions', missionsRouter);
+app.use('/missions', missionsRouter);
+
 app.use('/api/operators', operatorsRouter);
+app.use('/operators', operatorsRouter);
 
 // Health check endpoint
-app.get('/api/health', async (req: Request, res: Response) => {
+app.get(['/api/health', '/health'], async (req: Request, res: Response) => {
   try {
     const dbCheck = await pool.query('SELECT NOW()');
     res.status(200).json({
@@ -56,9 +61,9 @@ app.get('/api/health', async (req: Request, res: Response) => {
 });
 
 // Root terminal index
-app.get('/api', (req: Request, res: Response) => {
+app.get(['/api', '/'], (req: Request, res: Response) => {
   res.status(200).json({
-    message: "RUSSAW: Tactial Collective REST API Gateway v1.0.0",
+    message: "RUSSAW: Tactical Collective REST API Gateway v1.0.0",
     status: "authorized_access_only"
   });
 });
