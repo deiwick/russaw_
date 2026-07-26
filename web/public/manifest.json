@@ -49,10 +49,17 @@
   "screenshots": [
     {
       "src": "/map-shot.png",
-      "sizes": "1536x960",
+      "sizes": "758x60",
       "type": "image/png",
       "form_factor": "wide",
       "label": "Chennai Tactical Map Grid Dashboard"
+    },
+    {
+      "src": "/mobile-shot.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Chennai Tactical Mobile HUD Interface"
     }
   ]
 }
