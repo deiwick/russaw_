@@ -149,6 +149,7 @@ export default function VoidPage() {
               <option value="infrastructure">Infrastructure Failure (Leaking, Roads, Power)</option>
               <option value="injustice">Social Injustice / Harassment</option>
               <option value="environmental">Environmental Neglect (Trash, Industrial Spills)</option>
+              <option value="emergency">S.O.S Emergency / Rescue Call (Immediate Danger)</option>
             </select>
 
             <label className="tactical-label">Report Title</label>

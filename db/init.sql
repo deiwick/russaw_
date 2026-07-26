@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS reports (
     geom GEOMETRY(Point, 4326),   -- Geospatial coordinate (WGS 84)
     status VARCHAR(20) DEFAULT 'unverified', -- 'unverified', 'verified', 'dismissed'
     upvotes INT DEFAULT 0,
+    engaged_count INT DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

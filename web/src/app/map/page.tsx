@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Compass, Eye, ShieldAlert, ArrowLeft, RefreshCw, Layers, CheckCircle } from 'lucide-react';
+import { Compass, Eye, ShieldAlert, ArrowLeft, RefreshCw, CheckCircle, Flame, Users, AlertTriangle } from 'lucide-react';
 
 interface Report {
   id: number;
@@ -11,27 +11,28 @@ interface Report {
   evidence_url: string | null;
   status: string;
   upvotes: number;
+  engaged_count: number;
   lat: number;
   lng: number;
   created_at: string;
 }
-
-const GRID_BOUNDS = {
-  minLat: 12.80,
-  maxLat: 13.25,
-  minLng: 80.10,
-  maxLng: 80.35,
-};
 
 export default function MapPage() {
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
+  
+  // Interactive Leaflet Map states
+  const [mapReady, setMapReady] = useState(false);
+  const mapRef = useRef<any>(null);
+  const LRef = useRef<any>(null);
+  const markersRef = useRef<any[]>([]);
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const animationRef = useRef<number | null>(null);
-  const sweepAngleRef = useRef(0);
+  // Local engagement states
+  const [isEngaging, setIsEngaging] = useState(false);
+  const [engagementLog, setEngagementLog] = useState<string[]>([]);
+  const [locallyEngaged, setLocallyEngaged] = useState<{ [key: number]: boolean }>({});
 
   // Fetch Reports from API
   const fetchReports = async () => {
@@ -43,217 +44,213 @@ export default function MapPage() {
       const data = await response.json();
       
       if (response.ok) {
-        setReports(data.reports || []);
-        // Auto-select first report if available
-        if (data.reports && data.reports.length > 0) {
-          setSelectedReport(data.reports[0]);
+        // Collect server reports
+        let serverReports: Report[] = data.reports || [];
+        
+        // Append local offline S.O.S queue reports if any
+        const localQueue = JSON.parse(localStorage.getItem('russaw_offline_sos_queue') || '[]');
+        if (localQueue.length > 0) {
+          // Exclude duplicates by ID
+          const existingIds = new Set(serverReports.map(r => r.id));
+          const filteredLocal = localQueue.filter((r: any) => !existingIds.has(r.id));
+          serverReports = [...filteredLocal, ...serverReports];
+        }
+
+        setReports(serverReports);
+        // Auto-select first report if available and none selected yet
+        if (serverReports.length > 0 && !selectedReport) {
+          setSelectedReport(serverReports[0]);
         }
       } else {
         setErrorMsg('Failed to load incident records.');
       }
     } catch (err) {
-      setErrorMsg('Gateway unreachable. Run backend stack.');
+      setErrorMsg('Gateway offline. Displaying local offline S.O.S queue.');
+      const localQueue = JSON.parse(localStorage.getItem('russaw_offline_sos_queue') || '[]');
+      setReports(localQueue);
+      if (localQueue.length > 0 && !selectedReport) {
+        setSelectedReport(localQueue[0]);
+      }
     } finally {
       setLoading(false);
     }
   };
 
+  // Initialize Leaflet Map
   useEffect(() => {
-    fetchReports();
-  }, []);
+    // 1. Inject Leaflet CSS from CDN dynamically
+    if (!document.querySelector('link[href*="leaflet.css"]')) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(link);
+    }
 
-  // Spatial projection helpers: maps Lat/Lng to Canvas Width/Height
-  const project = (lat: number, lng: number, width: number, height: number) => {
-    const x = ((lng - GRID_BOUNDS.minLng) / (GRID_BOUNDS.maxLng - GRID_BOUNDS.minLng)) * width;
-    const y = (1 - ((lat - GRID_BOUNDS.minLat) / (GRID_BOUNDS.maxLat - GRID_BOUNDS.minLat))) * height;
-    return { x, y };
-  };
-
-  // Canvas Radar Loop
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const resizeCanvas = () => {
-      // Set canvas to parent container square bounds
-      const parent = canvas.parentElement;
-      if (parent) {
-        const size = Math.min(parent.clientWidth, 600);
-        canvas.width = size;
-        canvas.height = size;
-      }
-    };
-    
-    resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
-
-    const render = () => {
-      const w = canvas.width;
-      const h = canvas.height;
-
-      // 1. Clear Screen
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, w, h);
-
-      // 2. Draw Radar Grid
-      ctx.strokeStyle = 'rgba(0, 255, 102, 0.08)';
-      ctx.lineWidth = 1;
-
-      // Horizontal and vertical grid lines
-      const divisions = 6;
-      for (let i = 1; i < divisions; i++) {
-        const x = (w / divisions) * i;
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
-        ctx.stroke();
-
-        const y = (h / divisions) * i;
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
-        ctx.stroke();
-      }
-
-      // Draw concentric radar circles
-      ctx.strokeStyle = 'rgba(0, 255, 102, 0.12)';
-      const maxRadius = Math.sqrt(w*w + h*h) / 2;
-      const center = { x: w / 2, y: h / 2 };
-      
-      for (let r = maxRadius / 5; r <= maxRadius; r += maxRadius / 5) {
-        ctx.beginPath();
-        ctx.arc(center.x, center.y, r, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-
-      // Draw Chennai Bounds Label markings
-      ctx.fillStyle = '#444444';
-      ctx.font = '9px ui-monospace, monospace';
-      ctx.fillText(`NW: ${GRID_BOUNDS.maxLat.toFixed(2)}N, ${GRID_BOUNDS.minLng.toFixed(2)}E`, 10, 15);
-      ctx.fillText(`SE: ${GRID_BOUNDS.minLat.toFixed(2)}N, ${GRID_BOUNDS.maxLng.toFixed(2)}E`, w - 130, h - 10);
-
-      // 3. Draw Radar Sweep Animation
-      sweepAngleRef.current = (sweepAngleRef.current + 0.01) % (Math.PI * 2);
-      const angle = sweepAngleRef.current;
-
-      const gradient = ctx.createRadialGradient(center.x, center.y, 0, center.x, center.y, maxRadius);
-      gradient.addColorStop(0, 'rgba(0, 255, 102, 0.05)');
-      gradient.addColorStop(1, 'rgba(0, 255, 102, 0)');
-
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.moveTo(center.x, center.y);
-      ctx.arc(center.x, center.y, maxRadius, angle - 0.25, angle);
-      ctx.lineTo(center.x, center.y);
-      ctx.fill();
-
-      // Sweep green leading edge line
-      ctx.strokeStyle = 'rgba(0, 255, 102, 0.2)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(center.x, center.y);
-      ctx.lineTo(
-        center.x + Math.cos(angle) * maxRadius,
-        center.y + Math.sin(angle) * maxRadius
-      );
-      ctx.stroke();
-
-      // 4. Draw Geolocation Data Points (Reports)
-      reports.forEach((report) => {
-        const { x, y } = project(report.lat, report.lng, w, h);
-        const isSelected = selectedReport?.id === report.id;
-
-        // Choose color based on status/category
-        let color = '255, 51, 51'; // Unverified = Hazard Red
-        if (report.status === 'verified') {
-          color = '0, 255, 102'; // Verified = Safe/Secure Green
-        } else if (report.category === 'environmental') {
-          color = '0, 229, 255'; // Environmental = Cyan
+    const initMap = async () => {
+      try {
+        const L = await import('leaflet');
+        LRef.current = L;
+        
+        // Prevent container already initialized error on React hot reload
+        const container = L.DomUtil.get('map-leaflet');
+        if (container) {
+          (container as any)._leaflet_id = null;
+          container.innerHTML = '';
         }
 
-        // Draw pulsing expanding rings
-        const pulseRatio = (Date.now() % 1500) / 1500; // 0 to 1 loop
-        ctx.strokeStyle = `rgba(${color}, ${0.4 * (1 - pulseRatio)})`;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(x, y, 4 + pulseRatio * 16, 0, Math.PI * 2);
-        ctx.stroke();
+        // Initialize Map
+        const map = L.map('map-leaflet', {
+          center: [13.0827, 80.2707], // Chennai center
+          zoom: 12,
+          zoomControl: false
+        });
 
-        // Draw core marker dot
-        ctx.fillStyle = `rgba(${color}, 1)`;
-        ctx.beginPath();
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
-        ctx.fill();
+        // Add standard OSM tiles (CSS filters in globals.css will invert to dark mode)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 18,
+          attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
 
-        // If selected, draw a crosshair target around it
-        if (isSelected) {
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 1.5;
-          
-          // Outer box
-          ctx.strokeRect(x - 8, y - 8, 16, 16);
-
-          // Pointer lines
-          ctx.beginPath();
-          ctx.moveTo(x - 12, y); ctx.lineTo(x - 5, y);
-          ctx.moveTo(x + 5, y); ctx.lineTo(x + 12, y);
-          ctx.moveTo(x, y - 12); ctx.lineTo(x, y - 5);
-          ctx.moveTo(x, y + 5); ctx.lineTo(x, y + 12);
-          ctx.stroke();
-
-          // Text label
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText(`NODE #${report.id}`, x + 12, y - 12);
-        }
-      });
-
-      animationRef.current = requestAnimationFrame(render);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+        
+        mapRef.current = map;
+        setMapReady(true);
+      } catch (err) {
+        console.error('Failed to mount interactive Leaflet map:', err);
+      }
     };
 
-    render();
+    initMap();
 
     return () => {
-      window.removeEventListener('resize', resizeCanvas);
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
       }
     };
-  }, [reports, selectedReport]);
+  }, []);
 
-  // Click handler to select report node on Canvas
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+  // Update map markers when reports list or map status changes
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !LRef.current) return;
+    const L = LRef.current;
+    const map = mapRef.current;
 
-    const rect = canvas.getBoundingClientRect();
-    // Calculate click coordinates relative to canvas dimensions
-    const clickX = ((e.clientX - rect.left) / rect.width) * canvas.width;
-    const clickY = ((e.clientY - rect.top) / rect.height) * canvas.height;
-
-    // Find the closest marker within a threshold radius (15px)
-    let closestReport: Report | null = null;
-    let minDistance = 15;
+    // Clear old markers
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
 
     reports.forEach((report) => {
-      const { x, y } = project(report.lat, report.lng, canvas.width, canvas.height);
-      const distance = Math.hypot(clickX - x, clickY - y);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestReport = report;
+      let markerIcon;
+
+      if (report.category === 'emergency' || report.status === 'emergency') {
+        // High-contrast Flashing Siren megabeacon for S.O.S alerts
+        markerIcon = L.divIcon({
+          className: 'custom-leaflet-icon',
+          html: `<div class="siren-marker">🚨</div>`,
+          iconSize: [28, 28],
+          iconAnchor: [14, 14]
+        });
+      } else {
+        let colorClass = 'radar-dot-red';
+        if (report.status === 'verified') {
+          colorClass = 'radar-dot-green';
+        } else if (report.category === 'environmental') {
+          colorClass = 'radar-dot-cyan';
+        }
+
+        // Create Custom Neon Pulser DivIcon
+        markerIcon = L.divIcon({
+          className: 'custom-leaflet-icon',
+          html: `<div class="pulse-marker ${colorClass}"><span class="core-dot"></span></div>`,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10]
+        });
       }
+
+      const marker = L.marker([report.lat, report.lng], { icon: markerIcon })
+        .addTo(map)
+        .on('click', () => {
+          setSelectedReport(report);
+        });
+
+      // Bind simple popup
+      marker.bindPopup(`
+        <div style="font-family: monospace; font-size: 0.75rem; color: #fff;">
+          <strong>[NODE #${report.id}]</strong><br/>
+          Category: ${report.category.toUpperCase()}<br/>
+          Status: ${report.status.toUpperCase()}
+        </div>
+      `);
+
+      markersRef.current.push(marker);
     });
 
-    if (closestReport) {
-      setSelectedReport(closestReport);
-      console.log(`[RADAR COMPASS] Locked target node #${(closestReport as Report).id}`);
+    // Pan to selected report
+    if (selectedReport) {
+      map.panTo([selectedReport.lat, selectedReport.lng]);
+    }
+  }, [reports, mapReady, selectedReport]);
+
+  useEffect(() => {
+    fetchReports();
+    const interval = setInterval(fetchReports, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleEngageOperation = async (reportId: number) => {
+    setIsEngaging(true);
+    const logTime = new Date().toLocaleTimeString();
+    setEngagementLog(prev => [...prev, `[${logTime}] Establishing connection to satellite beacon...`]);
+
+    try {
+      // Check if report is local offline
+      const isLocalSos = reports.find(r => r.id === reportId)?.description.includes('OFFLINE');
+      
+      if (isLocalSos || !navigator.onLine) {
+        // Handle offline simulation
+        setTimeout(() => {
+          setEngagementLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] S.O.S satellite link active. Dispatch queued locally.`]);
+          setEngagementLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Operator alias registered in rescue dispatch roster.`]);
+          
+          setLocallyEngaged(prev => ({ ...prev, [reportId]: true }));
+          setReports(prev => prev.map(r => r.id === reportId ? { ...r, engaged_count: (r.engaged_count || 0) + 1 } : r));
+          if (selectedReport && selectedReport.id === reportId) {
+            setSelectedReport(prev => prev ? { ...prev, engaged_count: (prev.engaged_count || 0) + 1 } : null);
+          }
+          setIsEngaging(false);
+        }, 1500);
+      } else {
+        // Send actual engagement call to API
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+        const response = await fetch(`${apiUrl}/reports/${reportId}/engage`, { method: 'POST' });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setTimeout(() => {
+            setEngagementLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Mesh registry updated. Dispatch coordinates synchronizing.`]);
+            setEngagementLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Target locked: [${selectedReport?.lat.toFixed(5)}N, ${selectedReport?.lng.toFixed(5)}E]. Deploying.`]);
+            
+            setLocallyEngaged(prev => ({ ...prev, [reportId]: true }));
+            // Increment locally in reports array
+            setReports(prev => prev.map(r => r.id === reportId ? { ...r, engaged_count: data.report.engaged_count } : r));
+            setSelectedReport(prev => prev ? { ...prev, engaged_count: data.report.engaged_count } : null);
+            setIsEngaging(false);
+          }, 1500);
+        } else {
+          setEngagementLog(prev => [...prev, `[ERROR] Failed to synchronize dispatch. Mesh connection degraded.`]);
+          setIsEngaging(false);
+        }
+      }
+    } catch (err) {
+      setEngagementLog(prev => [...prev, `[ERROR] Satcom failure. Triangulation coordinates lost.`]);
+      setIsEngaging(false);
     }
   };
 
   const getMimeBadgeClass = (category: string) => {
     switch (category) {
+      case 'emergency': return 'red';
       case 'infrastructure': return 'cyan';
       case 'injustice': return 'red';
       default: return 'green';
@@ -261,7 +258,7 @@ export default function MapPage() {
   };
 
   return (
-    <div className="app-container" style={{ maxWidth: '850px' }}>
+    <div className="app-container" style={{ maxWidth: '950px' }}>
       {/* Header */}
       <header style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <a href="/" style={{ color: 'var(--fg-secondary)', display: 'flex', alignItems: 'center', textDecoration: 'none' }}>
@@ -279,31 +276,37 @@ export default function MapPage() {
       {/* Grid Alert Status */}
       <div style={{ marginBottom: '1.5rem' }}>
         <h1 className="glow-text-green" style={{ fontSize: '1.8rem', color: 'var(--neon-green)', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <Compass size={24} /> THE MAP
+          <Compass size={24} /> THE MAP GRID
         </h1>
         <p style={{ color: 'var(--fg-secondary)', fontSize: '0.9rem', marginTop: '0.3rem' }}>
-          Chennai Spatial Audit. Tap active radar signals to inspect verified/unverified operational nodes.
+          Real Chennai City Spatial Audit. Interactive satellite overlays displaying operational nodes, live emergency reports, and rescue coordinates.
         </p>
       </div>
 
       {/* Operational Dashboard Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem' }}>
-        {/* Radar Map Column */}
-        <div>
-          <div className="terminal-card" style={{ padding: '0.5rem', background: '#000000', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            <canvas
-              ref={canvasRef}
-              onClick={handleCanvasClick}
-              style={{ display: 'block', cursor: 'crosshair', maxWidth: '100%' }}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', alignItems: 'start', gridTemplateRows: 'auto' }}>
+        
+        {/* Interactive Map Column */}
+        <div style={{ gridColumn: 'span 1' }}>
+          <div className="terminal-card" style={{ padding: '0.25rem', background: '#000000', height: '400px', position: 'relative', border: '1px solid var(--border-bright)' }}>
+            <div 
+              id="map-leaflet" 
+              style={{ width: '100%', height: '100%', background: '#000' }}
             />
+            {!mapReady && (
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', background: 'rgba(0,0,0,0.85)', gap: '0.5rem', color: 'var(--neon-cyan)', fontSize: '0.8rem' }}>
+                <span className="spin" style={{ width: '16px', height: '16px', border: '2px solid var(--neon-cyan)', borderTopColor: 'transparent', borderRadius: '50%' }}></span>
+                <span>INITIALIZING SATELLITE TILES...</span>
+              </div>
+            )}
           </div>
           <span style={{ fontSize: '0.75rem', color: 'var(--fg-secondary)', display: 'block', marginTop: '0.5rem', textAlign: 'center' }}>
-            RADAR SCAN RANGE: CHENNAI viewport [12.80N-13.25N, 80.10E-80.35E] • TAP MARKER TO LOCK HUD
+            OPERATING OVER OPENSTREETMAP GRID • TAP MARKER TO LOCK TELEMETRY
           </span>
         </div>
 
         {/* HUD side panel Column */}
-        <div className="terminal-card" style={{ borderColor: 'var(--border-bright)', background: 'var(--bg-deep)' }}>
+        <div className="terminal-card" style={{ borderColor: 'var(--border-bright)', background: 'var(--bg-deep)', gridColumn: 'span 1', minHeight: '400px' }}>
           {selectedReport ? (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-dim)', paddingBottom: '0.75rem', marginBottom: '1rem' }}>
@@ -315,72 +318,98 @@ export default function MapPage() {
                 </span>
               </div>
 
-              <h3 style={{ fontSize: '1.3rem', color: 'var(--fg-primary)', marginBottom: '0.5rem' }}>
+              {selectedReport.category === 'emergency' && (
+                <div style={{ border: '1px solid var(--neon-red)', background: 'rgba(255, 51, 51, 0.05)', padding: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--neon-red)', fontSize: '0.75rem', fontWeight: 'bold' }}>
+                  <Flame size={14} style={{ animation: 'alert-flash 1s infinite alternate' }} />
+                  <span>S.O.S ACTIVE: ENGAGE RESCUE OPERATION IMMEDIATELY</span>
+                </div>
+              )}
+
+              <h3 style={{ fontSize: '1.25rem', color: 'var(--fg-primary)', marginBottom: '0.5rem', fontWeight: 'bold' }}>
                 {selectedReport.title}
               </h3>
 
-              <div style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem', color: 'var(--fg-secondary)', marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', fontSize: '0.8rem', color: 'var(--fg-secondary)', marginBottom: '1rem' }}>
                 <span>GPS: <strong>{selectedReport.lat.toFixed(5)}N, {selectedReport.lng.toFixed(5)}E</strong></span>
                 <span>STATUS: 
-                  <strong style={{ color: selectedReport.status === 'verified' ? 'var(--neon-green)' : 'var(--neon-red)', marginLeft: '0.3rem' }}>
+                  <strong style={{ color: selectedReport.category === 'emergency' ? 'var(--neon-red)' : selectedReport.status === 'verified' ? 'var(--neon-green)' : 'var(--neon-red)', marginLeft: '0.3rem' }}>
                     {selectedReport.status.toUpperCase()}
                   </strong>
                 </span>
               </div>
 
-              <p style={{ color: 'var(--fg-primary)', fontSize: '0.9rem', lineHeight: '1.5', background: 'var(--bg-elevated)', padding: '1rem', border: '1px solid var(--border-dim)', marginBottom: '1.5rem', whiteSpace: 'pre-wrap' }}>
+              <p style={{ color: 'var(--fg-primary)', fontSize: '0.85rem', lineHeight: '1.5', background: 'var(--bg-elevated)', padding: '0.75rem', border: '1px solid var(--border-dim)', marginBottom: '1rem', whiteSpace: 'pre-wrap' }}>
                 {selectedReport.description}
               </p>
 
               {/* Evidence photo preview */}
               {selectedReport.evidence_url ? (
-                <div style={{ marginBottom: '1.5rem' }}>
-                  <span className="tactical-label" style={{ marginBottom: '0.5rem' }}>LEAKED EVIDENCE ATTACHMENT</span>
-                  <div style={{ border: '1px solid var(--border-dim)', background: 'var(--bg-pitch)', padding: '0.5rem', position: 'relative', overflow: 'hidden' }}>
-                    {/* Convert relative path to full URL */}
+                <div style={{ marginBottom: '1rem' }}>
+                  <span className="tactical-label" style={{ marginBottom: '0.4rem', fontSize: '0.75rem' }}>EVIDENCE REPORT PHOTOGRAPH</span>
+                  <div style={{ border: '1px solid var(--border-dim)', background: 'var(--bg-pitch)', padding: '0.4rem' }}>
                     <img 
                       src={`${process.env.NEXT_PUBLIC_API_URL ? process.env.NEXT_PUBLIC_API_URL.replace('/api', '') : 'http://localhost:5000'}${selectedReport.evidence_url}`}
-                      alt="Evidence Upload"
-                      style={{ width: '100%', maxHeight: '250px', objectFit: 'contain', border: '1px solid var(--border-bright)' }}
+                      alt="Leaked Evidence"
+                      style={{ width: '100%', maxHeight: '200px', objectFit: 'contain', border: '1px solid var(--border-bright)' }}
                       onError={(e) => {
-                        // Fallback image source or warning state
                         (e.target as HTMLImageElement).src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="red" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>';
                       }}
                     />
-                    <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--fg-secondary)' }}>
-                      <span>EXIF STATUS: <strong>STRIPPED [SECURE]</strong></span>
-                      <a 
-                        href={`${process.env.NEXT_PUBLIC_API_URL ? process.env.NEXT_PUBLIC_API_URL.replace('/api', '') : 'http://localhost:5000'}${selectedReport.evidence_url}`} 
-                        target="_blank" 
-                        rel="noreferrer" 
-                        style={{ color: 'var(--neon-green)', textDecoration: 'none' }}
-                      >
-                        EXPAND BINARY
-                      </a>
-                    </div>
                   </div>
                 </div>
               ) : (
-                <div className="terminal-card" style={{ textAlign: 'center', padding: '1rem', borderStyle: 'dashed', color: 'var(--fg-secondary)', fontSize: '0.8rem', marginBottom: '1.5rem' }}>
-                  NO BINARY PHOTO LOGGED WITH THIS REPORT ENTRY
+                <div className="terminal-card" style={{ textAlign: 'center', padding: '0.75rem', borderStyle: 'dashed', color: 'var(--fg-secondary)', fontSize: '0.75rem', marginBottom: '1rem' }}>
+                  NO BINARY EVIDENCE LOGGED
                 </div>
               )}
 
-              {/* Status info/actions */}
-              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', borderTop: '1px solid var(--border-dim)', paddingTop: '1rem' }}>
-                <span style={{ fontSize: '0.75rem', color: 'var(--fg-secondary)' }}>
-                  LOGGED: {new Date(selectedReport.created_at).toLocaleString()}
-                </span>
+              {/* Engage rescue operation trigger */}
+              <div style={{ borderTop: '1px solid var(--border-dim)', paddingTop: '1rem', marginTop: '1rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--fg-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <Users size={14} /> ACTIVE DISPATCHED SCOUTS: <strong style={{ color: 'var(--neon-cyan)' }}>{selectedReport.engaged_count || 0}</strong>
+                  </span>
+                  {locallyEngaged[selectedReport.id] && (
+                    <span className="neon-badge green" style={{ fontSize: '0.65rem' }}>DISPATCHED</span>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => handleEngageOperation(selectedReport.id)}
+                  disabled={isEngaging || locallyEngaged[selectedReport.id]}
+                  className={`tactical-btn ${selectedReport.category === 'emergency' ? 'danger' : 'primary'}`}
+                  style={{ width: '100%', fontSize: '0.75rem', justifyContent: 'center' }}
+                >
+                  {locallyEngaged[selectedReport.id] 
+                    ? '✓ DISPATCH CONFIRMED' 
+                    : isEngaging 
+                      ? 'SYNCING SATELLITE DEPLOYMENT...' 
+                      : selectedReport.category === 'emergency' 
+                        ? 'ENGAGE IN RESCUE OPERATION' 
+                        : 'ENGAGE IN AUDIT OPERATION'
+                  }
+                </button>
               </div>
+
+              {/* Real-time sync logs */}
+              {engagementLog.length > 0 && (
+                <div className="terminal-card" style={{ marginTop: '1rem', background: '#000', borderColor: 'var(--border-dim)', padding: '0.5rem', maxHeight: '100px', overflowY: 'auto' }}>
+                  {engagementLog.map((log, i) => (
+                    <div key={i} style={{ fontSize: '0.7rem', color: 'var(--neon-green)', fontFamily: 'var(--font-mono)' }}>
+                      {log}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
-            <div style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--fg-dark)' }}>
+            <div style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--fg-dark)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
               <ShieldAlert size={36} style={{ marginBottom: '1rem' }} />
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.9rem' }}>
-                GRID INSPECTOR OFFLINE
+                GRID COMPASS OFFLINE
               </p>
               <p style={{ fontSize: '0.75rem', marginTop: '0.2rem' }}>
-                SELECT AN ACTIVE TARGET NODE ON THE GRID RADAR TO INITIALIZE HUD
+                TAP A RADAR PIN POINT ON THE CHENNAI MAP GRID TO INTERCEPT DATA
               </p>
             </div>
           )}

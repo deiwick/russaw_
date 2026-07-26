@@ -9,8 +9,34 @@ const { Pool } = pg;
 // Flag to fallback to in-memory database mock if PostgreSQL is offline
 let useMock = false;
 
-// Mock database storage
-const memoryReports: any[] = [];
+const memoryReports: any[] = [
+  {
+    id: 1,
+    category: 'emergency',
+    title: 'Flooding & Entrapment S.O.S',
+    description: 'Severe water logging near T. Nagar (GN Chetty Road). Stranded residents require assistance. Inflatable rafts and search lights requested by local scouts.',
+    evidence_url: null,
+    status: 'emergency',
+    upvotes: 0,
+    engaged_count: 3,
+    lat: 13.0440,
+    lng: 80.2372,
+    created_at: new Date(Date.now() - 3600000).toISOString()
+  },
+  {
+    id: 2,
+    category: 'infrastructure',
+    title: 'Exposed Live High-Voltage Cable',
+    description: 'Damaged power conduit hanging near the entrance of Central Station metro exit. Dangerously close to foot traffic. Reported to TNEB but no action taken.',
+    evidence_url: null,
+    status: 'verified',
+    upvotes: 5,
+    engaged_count: 1,
+    lat: 13.0818,
+    lng: 80.2724,
+    created_at: new Date(Date.now() - 7200000).toISOString()
+  }
+];
 const memoryKeys: any[] = [];
 const memoryOperators: any[] = [];
 const memoryForumPosts: any[] = [];
@@ -97,7 +123,7 @@ function runMockQuery(text: string, params: any[]): any {
   }
 
   // 2. GET REPORTS
-  if (normalized.startsWith('SELECT id, category, title, description, evidence_url, status, upvotes, ST_Y(geom) as lat, ST_X(geom) as lng')) {
+  if (normalized.startsWith('SELECT id, category, title, description, evidence_url, status, upvotes, engaged_count, ST_Y(geom)')) {
     return { rows: memoryReports };
   }
 
@@ -112,11 +138,28 @@ function runMockQuery(text: string, params: any[]): any {
       evidence_url,
       lat: parseFloat(lat),
       lng: parseFloat(lng),
-      status: statusVal || 'unverified',
+      status: category === 'emergency' ? 'emergency' : (statusVal || 'unverified'),
       upvotes: 0,
+      engaged_count: 0,
       created_at: new Date().toISOString()
     };
     memoryReports.unshift(newReport);
+
+    // Sync mock mission to memoryMissions array
+    const newMission = {
+      id: memoryMissions.length + 1,
+      title: `Audit: ${title}`,
+      description: `Verification briefing: ${description}`,
+      category,
+      lat: parseFloat(lat),
+      lng: parseFloat(lng),
+      radius_meters: 300,
+      points: 150,
+      is_active: true,
+      created_at: new Date().toISOString()
+    };
+    memoryMissions.unshift(newMission);
+
     return { rows: [newReport] };
   }
 
@@ -221,6 +264,17 @@ function runMockQuery(text: string, params: any[]): any {
     };
     memoryForumPosts.unshift(post);
     return { rows: [post] };
+  }
+
+  // 15. ENGAGE REPORT
+  if (normalized.startsWith('UPDATE reports SET engaged_count = engaged_count + 1')) {
+    const [id] = params;
+    const report = memoryReports.find(r => r.id === parseInt(id));
+    if (report) {
+      report.engaged_count = (report.engaged_count || 0) + 1;
+      return { rows: [report] };
+    }
+    return { rows: [] };
   }
 
   console.warn(`[MOCK LEDGER] Unhandled query: "${text}". Returning empty results.`);

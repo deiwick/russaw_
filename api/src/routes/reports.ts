@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { createReport, getReports } from '../controllers/reportsController';
+import { createReport, getReports, engageReport } from '../controllers/reportsController';
 
 const router = Router();
 
@@ -27,5 +27,8 @@ router.get('/', getReports);
 
 // POST /api/reports - Anonymous filing
 router.post('/', upload.single('evidence'), createReport);
+
+// POST /api/reports/:id/engage - Operator engagement dispatch
+router.post('/:id/engage', engageReport);
 
 export default router;

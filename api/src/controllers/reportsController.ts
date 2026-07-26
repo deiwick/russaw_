@@ -74,14 +74,28 @@ export const createReport = async (req: Request, res: Response) => {
     }
 
     // 3. Database Insertion (Injecting PostGIS Coordinate Point)
+    const statusVal = category === 'emergency' ? 'emergency' : 'unverified';
     const queryText = `
-      INSERT INTO reports (category, title, description, evidence_url, geom)
-      VALUES ($1, $2, $3, $4, ST_SetSRID(ST_MakePoint($5, $6), 4326))
+      INSERT INTO reports (category, title, description, evidence_url, geom, status)
+      VALUES ($1, $2, $3, $4, ST_SetSRID(ST_MakePoint($5, $6), 4326), $7)
       RETURNING id, category, title, status, created_at
     `;
-    const values = [category, title, description, evidenceUrl, longitude, latitude];
+    const values = [category, title, description, evidenceUrl, longitude, latitude, statusVal];
     const dbResult = await pool.query(queryText, values);
     const newReport = dbResult.rows[0];
+
+    // 3b. Active Mission Insertion (Syncing incident to Mission Board)
+    const missionQueryText = `
+      INSERT INTO missions (title, description, category, target_geom, radius_meters, points, is_active)
+      VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326), 300, 150, TRUE)
+    `;
+    await pool.query(missionQueryText, [
+      `Audit: ${title}`,
+      `Verification Mission: ${description}`,
+      category,
+      longitude,
+      latitude
+    ]);
 
     // 4. Generate verification token receipt
     // Return to user for tracking validation tier upgrades.
@@ -124,6 +138,7 @@ export const getReports = async (req: Request, res: Response) => {
         evidence_url, 
         status, 
         upvotes, 
+        engaged_count,
         ST_Y(geom) as lat, 
         ST_X(geom) as lng, 
         created_at 
@@ -136,12 +151,40 @@ export const getReports = async (req: Request, res: Response) => {
     const reports = dbResult.rows.map((row: any) => ({
       ...row,
       lat: parseFloat(row.lat),
-      lng: parseFloat(row.lng)
+      lng: parseFloat(row.lng),
+      engaged_count: parseInt(row.engaged_count) || 0
     }));
 
     return res.status(200).json({ reports });
   } catch (error: any) {
     console.error('[DB EXCEPTION] Failed to fetch report ledger:', error);
+    return res.status(500).json({ error: 'internal_ledger_error' });
+  }
+};
+
+/**
+ * Register operator engagement for a specific report/rescue zone
+ */
+export const engageReport = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const queryText = `
+      UPDATE reports 
+      SET engaged_count = engaged_count + 1 
+      WHERE id = $1 
+      RETURNING id, title, engaged_count, status
+    `;
+    const dbResult = await pool.query(queryText, [id]);
+    if (dbResult.rows.length === 0) {
+      return res.status(404).json({ error: 'report_not_found' });
+    }
+    return res.status(200).json({
+      status: 'engaged',
+      message: 'Operator successfully engaged in this tactical operation.',
+      report: dbResult.rows[0]
+    });
+  } catch (error: any) {
+    console.error('[VOID EXCEPTION] Failed to engage in operation:', error);
     return res.status(500).json({ error: 'internal_ledger_error' });
   }
 };
